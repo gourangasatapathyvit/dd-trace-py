@@ -1559,6 +1559,11 @@ def terminate_process_group(proc: subprocess.Popen[bytes], timeout: float = 3.0)
 # dropped.
 
 
+def restore_default_sigint() -> None:
+    """Undo an inherited SIG_IGN for SIGINT, which some CI runners set, so that children handle it as usual."""
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
 def call_program(*args, **kwargs):
     timeout = kwargs.pop("timeout", None)
     if "env" in kwargs:

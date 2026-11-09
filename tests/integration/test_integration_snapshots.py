@@ -7,6 +7,7 @@ from ddtrace.internal.compat import PYTHON_VERSION_INFO
 from ddtrace.trace import tracer
 from tests.integration.utils import AGENT_VERSION
 from tests.utils import override_global_config
+from tests.utils import restore_default_sigint
 from tests.utils import snapshot
 
 
@@ -407,6 +408,7 @@ except KeyboardInterrupt:
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,  # Capture stderr instead of passing through
+            preexec_fn=restore_default_sigint,
         )
 
         try:

@@ -69,6 +69,7 @@ from tests.subprocesstest import run_process
 from tests.utils import TracerSpanContainer
 from tests.utils import call_program
 from tests.utils import request_token
+from tests.utils import restore_default_sigint
 from tests.utils import scoped_tracer
 from tests.utils import snapshot_context as _snapshot_context
 
@@ -515,7 +516,8 @@ def run_function_from_file(item, params=None):
         out: Union[bytes, str]
         err: Union[bytes, str]
         runner = run_process if isinstance(item, ClassSubprocessItem) else call_program
-        result = runner(*args, env=env, cwd=cwd, timeout=timeout)
+        popen_kwargs: dict[str, Any] = {} if sys.platform == "win32" else {"preexec_fn": restore_default_sigint}
+        result = runner(*args, env=env, cwd=cwd, timeout=timeout, **popen_kwargs)
         out, err, status, _ = result
         check_scenario_outcome(ProcessResult(*result))
 
