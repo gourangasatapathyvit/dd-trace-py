@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import Optional
 
-from ddtrace import config
 from ddtrace.internal import core
 from ddtrace.internal.datastreams.pipelines import get_pipelines_reporter
 from ddtrace.internal.datastreams.processor import DsmPathwayCodec
@@ -244,12 +243,13 @@ def pipelines_aiokafka_many_messages_consume(
                 pipelines_aiokafka_message_consume(instance, ctx, None, record, None)
 
 
-if config._data_streams_enabled:
-    core.on("aiokafka.send.start", dsm_aiokafka_send_start)
-    core.on("aiokafka.send.completed", dsm_aiokafka_send_completed)
-    core.on("aiokafka.getone.message", dsm_aiokafka_message_consume)
-    core.on("aiokafka.getmany.message", dsm_aiokafka_many_messages_consume)
-    core.on("aiokafka.commit.end", dsm_aiokafka_message_commit)
+# DSM2-599: DSM handlers are subscribed unconditionally, like the pipelines
+# ones, so remote config can enable DSM at runtime; each no-ops while inactive.
+core.on("aiokafka.send.start", dsm_aiokafka_send_start)
+core.on("aiokafka.send.completed", dsm_aiokafka_send_completed)
+core.on("aiokafka.getone.message", dsm_aiokafka_message_consume)
+core.on("aiokafka.getmany.message", dsm_aiokafka_many_messages_consume)
+core.on("aiokafka.commit.end", dsm_aiokafka_message_commit)
 
 # Automatic pipelines handlers are subscribed unconditionally (DSM2-531): each
 # no-ops when get_pipelines_reporter() is None, i.e. when pipelines reporting or
