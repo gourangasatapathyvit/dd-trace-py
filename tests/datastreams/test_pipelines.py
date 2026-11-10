@@ -12,6 +12,7 @@ from unittest import mock
 import pytest
 
 from ddtrace.internal.datastreams import pipelines
+from tests.utils import override_global_config
 
 
 class FakeClock:
@@ -217,7 +218,9 @@ def test_get_pipelines_reporter_none_when_apm_tracing_off():
 
 
 def test_get_pipelines_reporter_is_singleton_with_lazy_lifecycle():
-    with mock.patch.object(pipelines.config, "_data_streams_enabled", False):
+    # _data_streams_enabled is a _ConfigItem, so plain mock.patch.object cannot
+    # restore it (delattr); override_global_config is the supported override.
+    with override_global_config(dict(_data_streams_enabled=False)):
         reporter = pipelines.get_pipelines_reporter()
         try:
             assert reporter is not None

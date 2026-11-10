@@ -408,6 +408,11 @@ def _default_config() -> dict[str, _ConfigItem]:
             otel_env="OTEL_TRACES_EXPORTER",
             modifier=asbool,
         ),
+        "_data_streams_enabled": _ConfigItem(
+            default=False,
+            envs=["DD_DATA_STREAMS_ENABLED"],
+            modifier=asbool,
+        ),
         "_llmobs_enabled": _ConfigItem(
             default=False,
             envs=["DD_LLMOBS_ENABLED"],
@@ -716,11 +721,10 @@ class Config:
         self._client_side_stats_obfuscation = _get_config(
             "_DD_TRACE_STATS_COMPUTATION_EXPERIMENTAL_CLIENT_OBFUSCATION_ENABLED", True, asbool
         )
-        self._data_streams_enabled: bool = _get_config("DD_DATA_STREAMS_ENABLED", False, asbool)
         # DSM2-531 automatic pipelines: independent kill switch and flush window (in
         # seconds). The feature reports topic sides and in-process links even when
         # data streams monitoring is disabled, so it is deliberately NOT gated on
-        # _data_streams_enabled.
+        # _data_streams_enabled (which lives in _default_config for remote config).
         self._data_streams_pipelines_enabled: bool = _get_config("DD_DATA_STREAMS_PIPELINES_ENABLED", True, asbool)
         self._data_streams_pipelines_interval: float = _get_config("DD_DATA_STREAMS_PIPELINES_INTERVAL", 300.0, float)
         self._http_client_tag_query_string = _get_config("DD_TRACE_HTTP_CLIENT_TAG_QUERY_STRING", "true")
