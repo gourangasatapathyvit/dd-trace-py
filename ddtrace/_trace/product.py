@@ -75,6 +75,8 @@ APMCapabilities = (
     RemoteConfigCapabilities.ApmTracingCustomTags,
     RemoteConfigCapabilities.ApmTracingEnabled,
     RemoteConfigCapabilities.ApmTracingSampleRules,
+    # DSM2-599: declared so the backend offers data_streams_enabled overrides.
+    RemoteConfigCapabilities.ApmTracingDataStreamsEnabled,
 )
 
 
