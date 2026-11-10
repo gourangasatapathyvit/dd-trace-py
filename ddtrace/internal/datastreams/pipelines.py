@@ -484,18 +484,18 @@ def ensure_standalone_flusher() -> None:
 
     The report rides the DSM payload while DSM is on; disabling DSM via remote
     config stops that, so the standalone lifecycle starts here. No-op when a
-    flusher already runs, pipelines is disabled, or tracing is off. Never raises.
+    flusher already runs, pipelines is disabled, tracing is off, or no side
+    was ever recorded (the lazy _on_traffic path starts it on demand). Never
+    raises.
     """
-    global _flusher, _atexit_registered, _reporter
+    global _flusher, _atexit_registered
     try:
         if not _pipelines_enabled() or _apm_tracing_off():
             return
         if config._data_streams_enabled:
             return  # the report still rides the DSM payload
         if _reporter is None:
-            with _reporter_lock:
-                if _reporter is None:
-                    _reporter = PipelinesReporter()
+            return  # no traffic yet: _on_traffic starts the lifecycle later
         with _lifecycle_lock:
             if _flusher is not None:
                 return
@@ -506,6 +506,24 @@ def ensure_standalone_flusher() -> None:
                 ddtrace_atexit.register(_atexit_flush)
     except Exception:  # noqa: BLE001 - never raise into the RC callback
         log.debug("pipelines: failed to start the standalone flusher", exc_info=True)
+
+
+def stop_standalone_flusher() -> None:
+    """Stop the standalone flusher when DSM is re-enabled at runtime (DSM2-599).
+
+    While DSM runs, the report rides the DSM processor's periodic payload, so
+    the flusher's window loop would only race PipelinesReporter.take_report
+    against it. Never raises.
+    """
+    global _flusher
+    try:
+        with _lifecycle_lock:
+            flusher = _flusher
+            _flusher = None
+        if flusher is not None:
+            flusher.stop(0.1)
+    except Exception:  # noqa: BLE001 - never raise into the RC callback
+        log.debug("pipelines: failed to stop the standalone flusher", exc_info=True)
 
 
 def _atexit_flush() -> None:

@@ -6,6 +6,7 @@ from typing import Optional
 
 from ddtrace.internal.logger import get_logger
 from ddtrace.internal.settings._config import config
+from ddtrace.internal.threads import Lock
 
 from ...internal.utils.importlib import require_modules
 
@@ -24,6 +25,9 @@ required_module_to_integration = {
     "google.cloud.pubsub_v1": "google_cloud_pubsub",
 }
 _processor: Optional[DataStreamsProcessor] = None
+# Serializes processor creation: two threads racing on the first checkpoint
+# would otherwise each construct a processor, orphaning a running one.
+_processor_lock = Lock()
 
 
 def _import_integration_modules() -> None:
@@ -45,22 +49,30 @@ if config._data_streams_enabled or config._data_streams_pipelines_enabled:
 def data_streams_processor(reset: bool = False) -> Optional[DataStreamsProcessor]:
     global _processor
     if config._data_streams_enabled and (not _processor or reset):
-        from . import processor
+        with _processor_lock:
+            if not _processor or reset:
+                from . import processor
 
-        _processor = processor.DataStreamsProcessor()
-
-    return _processor
+                _processor = processor.DataStreamsProcessor()
+    # A stale processor with the setting off (e.g. a fork racing a remote-config
+    # disable) must not keep reporting: the handlers treat None as inactive.
+    return _processor if config._data_streams_enabled else None
 
 
 def start_data_streams_processor() -> None:
     """Enable classic DSM at runtime (remote config, DSM2-599). Never raises.
 
     Imports the per-system hook modules (skipped at import time when DSM and
-    pipelines were both off at startup) and creates the processor.
+    pipelines were both off at startup), stops the standalone pipelines flusher
+    so the report rides the DSM processor's payload again, and creates the
+    processor.
     """
     global _processor
     try:
         _import_integration_modules()
+        from .pipelines import stop_standalone_flusher
+
+        stop_standalone_flusher()
         if _processor is None:
             data_streams_processor()
     except Exception:  # noqa: BLE001 - never raise into the RC callback
@@ -70,9 +82,14 @@ def start_data_streams_processor() -> None:
 def stop_data_streams_processor() -> None:
     """Disable classic DSM at runtime (remote config, DSM2-599). Never raises.
 
-    Shuts the processor down (flushing what it holds), drops the global so the
-    hook handlers go back to their no-op path, and hands pipelines reporting
-    back to the standalone flusher when it was riding the DSM payload.
+    Shuts the processor down (flushing what it holds; the retries of that flush
+    are not bounded by the timeout, so this can block the shared RC worker
+    thread for a few seconds), drops the global so the hook handlers go back
+    to their no-op path, and hands pipelines reporting back to the standalone
+    flusher when it was riding the DSM payload. A fork landing between the
+    setting flip and the processor drop leaves the child an inherited
+    processor; the disabled-setting check in data_streams_processor() makes
+    the child's hooks go inactive again.
     """
     global _processor
     processor = _processor
