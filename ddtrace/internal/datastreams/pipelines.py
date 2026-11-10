@@ -464,7 +464,7 @@ def _ensure_lifecycle(reporter: PipelinesReporter) -> None:
     """
     global _flusher, _lifecycle_started, _atexit_registered
     with _lifecycle_lock:
-        if _lifecycle_started:
+        if _lifecycle_started or _flusher is not None:
             return
         _lifecycle_started = True
         try:
@@ -477,6 +477,35 @@ def _ensure_lifecycle(reporter: PipelinesReporter) -> None:
         if not _atexit_registered:
             _atexit_registered = True
             ddtrace_atexit.register(_atexit_flush)
+
+
+def ensure_standalone_flusher() -> None:
+    """Start the standalone flusher when DSM is disabled at runtime (DSM2-599).
+
+    The report rides the DSM payload while DSM is on; disabling DSM via remote
+    config stops that, so the standalone lifecycle starts here. No-op when a
+    flusher already runs, pipelines is disabled, or tracing is off. Never raises.
+    """
+    global _flusher, _atexit_registered, _reporter
+    try:
+        if not _pipelines_enabled() or _apm_tracing_off():
+            return
+        if config._data_streams_enabled:
+            return  # the report still rides the DSM payload
+        if _reporter is None:
+            with _reporter_lock:
+                if _reporter is None:
+                    _reporter = PipelinesReporter()
+        with _lifecycle_lock:
+            if _flusher is not None:
+                return
+            _flusher = _StandaloneFlusher(_reporter)
+            _flusher.start()
+            if not _atexit_registered:
+                _atexit_registered = True
+                ddtrace_atexit.register(_atexit_flush)
+    except Exception:  # noqa: BLE001 - never raise into the RC callback
+        log.debug("pipelines: failed to start the standalone flusher", exc_info=True)
 
 
 def _atexit_flush() -> None:
