@@ -225,8 +225,11 @@ def test_rc_key_removed_falls_back_to_startup_value():
 
 def test_rc_disable_starts_standalone_pipelines_flusher(monkeypatch):
     # Pipelines reports rode the DSM payload while DSM was on; disabling DSM
-    # must hand them back to the standalone flusher immediately.
+    # must hand them back to the standalone flusher immediately (a reporter
+    # stands in for recorded traffic; without one the lifecycle stays lazy).
     monkeypatch.setattr(pipelines, "_flusher", None)
+    monkeypatch.setattr(pipelines, "_reporter", pipelines.PipelinesReporter())
+    monkeypatch.setattr(pipelines, "_atexit_registered", False)
     with (
         mock.patch.object(pipelines, "_StandaloneFlusher") as flusher_cls,
         mock.patch.object(pipelines.ddtrace_atexit, "register"),
@@ -236,6 +239,42 @@ def test_rc_disable_starts_standalone_pipelines_flusher(monkeypatch):
 
         _disable_dsm()
         assert flusher_cls.called
+
+
+def test_rc_reenable_stops_standalone_flusher(monkeypatch):
+    # disable -> enable must stop the standalone flusher: its window loop would
+    # race PipelinesReporter.take_report against the DSM processor's periodic
+    # _due_pipelines_report, and each cycle would leak a thread.
+    monkeypatch.setattr(pipelines, "_flusher", None)
+    monkeypatch.setattr(pipelines, "_reporter", pipelines.PipelinesReporter())
+    monkeypatch.setattr(pipelines, "_atexit_registered", False)
+    created = []
+    real_flusher_cls = pipelines._StandaloneFlusher
+
+    def make_flusher(reporter, *args, **kwargs):
+        flusher = real_flusher_cls(reporter, *args, **kwargs)
+        created.append(flusher)
+        return flusher
+
+    with (
+        mock.patch.object(pipelines, "_StandaloneFlusher", side_effect=make_flusher),
+        mock.patch.object(pipelines.ddtrace_atexit, "register"),
+    ):
+        _enable_dsm()
+        _disable_dsm()
+        assert len(created) == 1
+        assert pipelines._flusher is created[0]
+
+        _enable_dsm()
+        # The report rides the DSM payload again: no flusher, processor running.
+        assert pipelines._flusher is None
+        assert created[0]._stop_event.is_set(), "flusher was not stopped on re-enable"
+        assert data_streams_processor() is not None
+
+        # A later disable starts a fresh flusher again.
+        _disable_dsm()
+        assert len(created) == 2
+        assert pipelines._flusher is created[1]
 
 
 # -- T-4: startup env var matrix ------------------------------------------------
@@ -387,3 +426,30 @@ def test_dsm_off_handler_is_a_cheap_noop():
     kwargs = {"headers": {}}
     result = _produce(kwargs)
     assert result == {"headers": {}}
+
+
+# -- G-1: end-to-end poller chain -------------------------------------------------
+
+
+def test_apm_tracing_callback_end_to_end_enables_dsm():
+    # APMTracingCallback.__call__ -> "apm-tracing.rc" dispatch -> apm_tracing_rc,
+    # the chain the remote config poller drives in production.
+    from ddtrace.internal.core.event_hub import on
+    from ddtrace.internal.core.event_hub import reset as reset_listener
+    from ddtrace.internal.remoteconfig.products.apm_tracing import APMTracingCallback
+    from tests.utils import remote_config_build_payload as build_payload
+
+    on("apm-tracing.rc", apm_tracing_rc, "test-dsm2-599")
+    try:
+        payload = build_payload(
+            "APM_TRACING",
+            {"service_target": {"service": "*", "env": "*"}, "lib_config": {"data_streams_enabled": True}},
+            "config",
+        )
+        APMTracingCallback()([payload])
+    finally:
+        reset_listener("apm-tracing.rc", apm_tracing_rc)
+
+    processor = data_streams_processor()
+    assert processor is not None
+    assert config._config["_data_streams_enabled"].source() == "remote_config"

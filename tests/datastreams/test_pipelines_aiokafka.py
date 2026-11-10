@@ -54,7 +54,22 @@ def reporter(monkeypatch):
     monkeypatch.setattr(pipelines_module, "_reporter", None)
     r = pipelines_module.get_pipelines_reporter()
     assert r is not None, "pipelines reporting defaults to enabled"
-    return r
+    yield r
+    monkeypatch.setattr(pipelines_module, "_reporter", None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_pipelines_lifecycle():
+    """Stop a flusher this test started; later tests see a clean lifecycle."""
+    saved = (pipelines_module._flusher, pipelines_module._lifecycle_started)
+    yield
+    flusher = pipelines_module._flusher
+    if flusher is not None and flusher is not saved[0]:
+        try:
+            flusher.stop(timeout=2)
+        except Exception:  # noqa: BLE001 - cleanup only
+            pass
+    pipelines_module._flusher, pipelines_module._lifecycle_started = saved
 
 
 def take(reporter):

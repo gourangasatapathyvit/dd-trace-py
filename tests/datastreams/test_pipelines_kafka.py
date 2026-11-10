@@ -60,6 +60,12 @@ def fresh_reporter():
     assert reporter is not None
     yield reporter
     pipelines_module._reporter = None
+    # Stop a flusher this test started so later tests see a clean lifecycle.
+    flusher = pipelines_module._flusher
+    pipelines_module._flusher = None
+    pipelines_module._lifecycle_started = False
+    if flusher is not None:
+        flusher.stop(timeout=2)
 
 
 def _dispatch_produce(producer, topic, cluster_id=...):

@@ -208,6 +208,22 @@ def test_data_streams_enabled_precedence_service_env_over_env(monkeypatch):
     assert chained_config["data_streams_enabled"] is True
 
 
+def test_data_streams_enabled_precedence_service_over_env(monkeypatch):
+    # G-3: a service-only record (service+precedence key 4) outranks an env-only
+    # one (key 2), the two targeting levels below service+env.
+    monkeypatch.setattr(config, "service", "my-service")
+    callback = APMTracingCallback()
+
+    chained_config = callback._process_payloads(
+        [
+            _record("env-only", {"data_streams_enabled": False}, {"service": "*", "env": "my-env"}),
+            _record("svc-only", {"data_streams_enabled": True}, {"service": "my-service", "env": "*"}),
+        ]
+    )
+
+    assert chained_config["data_streams_enabled"] is True
+
+
 def test_data_streams_enabled_precedence_env_over_wildcard(monkeypatch):
     monkeypatch.setattr(config, "service", "my-service")
     monkeypatch.setattr(config, "env", "my-env")
