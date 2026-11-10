@@ -1675,6 +1675,9 @@ suites:
     env:
       TEST_KAFKA_HOST: kafka
       TEST_KAFKA_PORT: '29092'
+      # Pin the workers' inferred service: extra files passed on the command
+      # line would otherwise become the base service of every snapshot span.
+      _DD_PYTEST_XDIST_INFERRED_SERVICE: tests.contrib.kafka
     paths:
       - '@bootstrap'
       - '@contrib'
